@@ -4,13 +4,11 @@
       <input type="file" accept=".mid" @change="handleFileUpload" class="mb-4" />
   
       <div class="controls mb-4">
-        <button @click="play" class="btn bg-green-500">Play</button>
-        <button @click="pause" class="btn bg-yellow-500">Pause</button>
-        <button @click="stop" class="btn bg-red-500">Stop</button>
+        <button @click="togglePlay" class="btn bg-green-500">{{ isPlaying ? 'Stop' : 'Play' }}</button>
       </div>
   
       <h2 class="text-lg font-semibold mb-2">Current Note: {{ currentNote }}</h2>
-      <div ref="visualizerContainer" class="visualizer"></div>
+      <div ref="visualizerContainer" class="visualizer-container"></div>
     </div>
   </template>
   
@@ -20,10 +18,22 @@
   
   const currentNote = ref<string>('None');
   const visualizerContainer = ref<HTMLDivElement | null>(null);
+  const isPlaying = ref(false);
   
-  let player: mm.Player | null = null;
+  let player: mm.SoundFontPlayer;
   let visualizer: mm.StaffSVGVisualizer | null = null;
   let noteSequence: mm.INoteSequence | null = null;
+  
+  player = new mm.SoundFontPlayer('https://storage.googleapis.com/magentadata/js/soundfonts/sgm_plus', undefined, undefined, undefined, {
+    run: (note: mm.NoteSequence.INote) => {
+      currentNote.value = getNoteName(note.pitch);
+      visualizer?.redraw(note, true); // Highlight active notes and scroll
+    },
+    stop: () => {
+      isPlaying.value = false;
+      visualizer?.clearActiveNotes();
+    }
+  });
   
   const handleFileUpload = (event: Event) => {
     const input = event.target as HTMLInputElement;
@@ -32,44 +42,26 @@
       reader.onload = (e) => {
         if (e.target?.result instanceof ArrayBuffer) {
           const midiData = new Uint8Array(e.target.result);
-          noteSequence = mm.midiToSequenceProto(midiData);  // Correct method
+          noteSequence = mm.midiToSequenceProto(midiData);
   
-          // Initialize the visualizer
           if (visualizerContainer.value && noteSequence) {
-            visualizerContainer.value.innerHTML = ''; // Clear previous visualizer
+            visualizerContainer.value.innerHTML = ''; // Clear previous visualization
             visualizer = new mm.StaffSVGVisualizer(noteSequence, visualizerContainer.value);
           }
-  
-          // Initialize the player
-          player = new mm.Player();
-          player.callbackObject = {
-            run: (note: mm.NoteSequence.INote) => {
-              if (note.pitch) {
-                currentNote.value = getNoteName(note.pitch);
-                visualizer?.redraw(noteSequence!, note.startTime);
-              }
-            },
-          };
         }
       };
       reader.readAsArrayBuffer(input.files[0]);
     }
   };
   
-  const play = () => {
-    if (noteSequence && player) {
-      player.start(noteSequence);
-    }
-  };
-  
-  const pause = () => {
-    if (player) player.pause();
-  };
-  
-  const stop = () => {
-    if (player) {
+  const togglePlay = () => {
+    if (isPlaying.value) {
       player.stop();
+      isPlaying.value = false;
       currentNote.value = 'None';
+    } else if (noteSequence) {
+      player.start(noteSequence);
+      isPlaying.value = true;
     }
   };
   
@@ -88,16 +80,17 @@
     margin-right: 0.5rem;
     border-radius: 0.25rem;
     transition: background-color 0.3s;
+    cursor: pointer;
   }
   
-  .visualizer {
+  .visualizer-container {
     border: 2px solid #ccc;
     padding: 10px;
-    overflow-x: auto;
     background: #f9f9f9;
     border-radius: 8px;
     max-width: 100%;
     min-height: 200px;
+    overflow-x: auto;
   }
   </style>
   
