@@ -1,3 +1,7 @@
+## Notes
+
+- it seems *very* difficult to find reasonably simply MIDI melodies, without chords (and none of them are adapted to uke)
+
 ## Libraries
 
 ### magenta music

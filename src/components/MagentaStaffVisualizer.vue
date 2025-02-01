@@ -7,18 +7,35 @@
         <button @click="togglePlay" class="btn bg-green-500">{{ isPlaying ? 'Stop' : 'Play' }}</button>
       </div>
   
+      <div class="mb-4">
+        <label for="speed">Playback Speed: {{ (playbackSpeed * 100).toFixed(0) }}%</label>
+        <input
+          type="range"
+          id="speed"
+          min="0.2"
+          max="1.5"
+          step="0.01"
+          v-model="playbackSpeed"
+          @input="adjustPlaybackSpeed"
+        />
+      </div>
+  
       <h2 class="text-lg font-semibold mb-2">Current Note: {{ currentNote }}</h2>
+      <p class="text-sm text-gray-500">Next Notes: {{ nextNotes.join(', ') }}</p>
+  
       <div ref="visualizerContainer" class="visualizer-container"></div>
     </div>
   </template>
   
   <script setup lang="ts">
-  import { ref } from 'vue';
+  import { ref, watch } from 'vue';
   import * as mm from '@magenta/music';
   
   const currentNote = ref<string>('None');
+  const nextNotes = ref<string[]>([]);
   const visualizerContainer = ref<HTMLDivElement | null>(null);
   const isPlaying = ref(false);
+  const playbackSpeed = ref(1); // Default speed: 100%
   
   let player: mm.SoundFontPlayer;
   let visualizer: mm.StaffSVGVisualizer | null = null;
@@ -26,11 +43,19 @@
   
   player = new mm.SoundFontPlayer('https://storage.googleapis.com/magentadata/js/soundfonts/sgm_plus', undefined, undefined, undefined, {
     run: (note: mm.NoteSequence.INote) => {
+      const currentNoteIndex = noteSequence?.notes.findIndex((n) => n.startTime === note.startTime) || 0;
       currentNote.value = getNoteName(note.pitch);
+  
+      // Display next two notes
+      nextNotes.value = (noteSequence?.notes.slice(currentNoteIndex + 1, currentNoteIndex + 3) || [])
+        .map((n) => getNoteName(n.pitch));
+  
       visualizer?.redraw(note, true); // Highlight active notes and scroll
     },
     stop: () => {
       isPlaying.value = false;
+      currentNote.value = 'None';
+      nextNotes.value = [];
       visualizer?.clearActiveNotes();
     }
   });
@@ -59,10 +84,15 @@
       player.stop();
       isPlaying.value = false;
       currentNote.value = 'None';
+      nextNotes.value = [];
     } else if (noteSequence) {
       player.start(noteSequence);
       isPlaying.value = true;
     }
+  };
+  
+  const adjustPlaybackSpeed = () => {
+    player.setTempo(120 * playbackSpeed.value); // Adjust tempo (assuming default 120 BPM)
   };
   
   const getNoteName = (pitch: number) => {
@@ -91,6 +121,15 @@
     max-width: 100%;
     min-height: 200px;
     overflow-x: auto;
+  }
+  
+  input[type="range"] {
+    width: 100%;
+    margin-top: 5px;
+  }
+  
+  .text-sm {
+    font-size: 0.85rem;
   }
   </style>
   
