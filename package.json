@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@magenta/music": "^1.23.1",
+    "midi-player-js": "^2.0.16",
     "vue": "^3.5.13"
   },
   "devDependencies": {
