@@ -1,11 +1,10 @@
 <script setup>
+import MagentaStaffVisualizer from './components/MagentaStaffVisualizer.vue';
 import MidiEventEmitter from './components/MidiEventEmitter.vue';
-import MidiPlayer from './components/MidiPlayer.vue';
 
 </script>
 
 <template>
-  <!-- <MidiEventEmitter /> -->
-  <MidiPlayer />
+  <MagentaStaffVisualizer />
 </template>
 
