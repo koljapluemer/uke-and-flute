@@ -63,6 +63,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import AudioNoteDetector from './AudioNoteDetector.vue';
+import * as Tone from 'tone';
 
 interface Song {
   id: string;
@@ -91,6 +92,14 @@ let playInterval: number | null = null;
 let lastNoteTime = 0;
 let expectedNotes: string[] = [];
 
+// Add feedback state tracking
+interface NoteFeedback {
+  isCorrect: boolean;
+  timestamp: number;
+}
+
+const feedbackState = ref<Record<number, NoteFeedback>>({});
+
 const tabStanzas = computed(() => {
   if (!currentSong.value?.tabContent) return [];
   return currentSong.value.tabContent
@@ -112,6 +121,12 @@ const getExpectedNote = (char: string, stringName: string): string | null => {
 const lastDetectedNote = ref<string | null>(null);
 
 const isCorrectNote = (char: string, charIndex: number) => {
+  // Return stored feedback state if it exists
+  if (feedbackState.value[charIndex]?.isCorrect) {
+    return true;
+  }
+
+  // Only check current position for active highlighting
   if (charIndex !== currentPosition.value) return false;
   if (!lastDetectedNote.value) return false;
   
@@ -123,10 +138,16 @@ const isCorrectNote = (char: string, charIndex: number) => {
     return expectedNote === lastDetectedNote.value;
   }
   
-  return true;
+  return false;
 };
 
 const isWrongNote = (char: string, charIndex: number) => {
+  // Return stored feedback state if it exists
+  if (feedbackState.value[charIndex]?.isCorrect === false) {
+    return true;
+  }
+
+  // Only check current position for active highlighting
   if (charIndex !== currentPosition.value) return false;
   if (!lastDetectedNote.value) return false;
   
@@ -149,28 +170,32 @@ const handleNoteDetected = (note: string | null, frequency: number) => {
   const now = Date.now();
   const timeSinceLastNote = now - lastNoteTime;
   const expectedTime = (60 * 1000) / bpm.value;
+  const timeWindow = expectedTime * 0.5; // More generous 50% time window
   
-  // Check if we're in the right time window (±20% of expected time)
-  const isInTimeWindow = Math.abs(timeSinceLastNote - expectedTime) < expectedTime * 0.2;
+  // Check if we're in the right time window (±50% of expected time)
+  const isInTimeWindow = Math.abs(timeSinceLastNote - expectedTime) < timeWindow;
   
   if (note) {
-    if (isInTimeWindow) {
-      // Check if the note matches any of the expected notes
-      const isCorrect = expectedNotes.includes(note);
-      
-      if (isCorrect) {
-        feedbackMessage.value = 'Correct note!';
-        feedbackClass.value = 'bg-success text-success-content';
-      } else {
-        feedbackMessage.value = 'Wrong note!';
-        feedbackClass.value = 'bg-error text-error-content';
-      }
-    } else if (timeSinceLastNote < expectedTime * 0.8) {
-      feedbackMessage.value = 'Too early!';
-      feedbackClass.value = 'bg-warning text-warning-content';
+    // Check if the note matches any of the expected notes
+    const isCorrect = expectedNotes.includes(note);
+    
+    // Store feedback state for current position
+    if (isCorrect) {
+      feedbackState.value[currentPosition.value] = {
+        isCorrect: true,
+        timestamp: now
+      };
+      feedbackMessage.value = isInTimeWindow ? 'Correct note!' : (
+        timeSinceLastNote < expectedTime * 0.5 ? 'Too early, but correct note!' : 'Too late, but correct note!'
+      );
+      feedbackClass.value = isInTimeWindow ? 'bg-success text-success-content' : 'bg-warning text-warning-content';
     } else {
-      feedbackMessage.value = 'Too late!';
-      feedbackClass.value = 'bg-warning text-warning-content';
+      feedbackState.value[currentPosition.value] = {
+        isCorrect: false,
+        timestamp: now
+      };
+      feedbackMessage.value = 'Wrong note!';
+      feedbackClass.value = 'bg-error text-error-content';
     }
   }
 };
@@ -186,6 +211,9 @@ const togglePlay = () => {
 };
 
 const startPlayback = () => {
+  // Reset feedback state when starting new playback
+  feedbackState.value = {};
+  
   // Calculate milliseconds per beat based on BPM
   const msPerBeat = (60 * 1000) / bpm.value;
   
@@ -208,6 +236,8 @@ const startPlayback = () => {
     // Reset position when reaching the end of the first line
     if (currentPosition.value >= tabStanzas.value[0][0].length) {
       currentPosition.value = 0;
+      // Optionally reset feedback state when looping
+      // feedbackState.value = {};
     }
   }, msPerBeat);
 };
@@ -221,6 +251,7 @@ const stopPlayback = () => {
   feedbackMessage.value = '';
   feedbackClass.value = '';
   expectedNotes = [];
+  // Don't reset feedbackState here so colors remain after stopping
 };
 
 onMounted(() => {
