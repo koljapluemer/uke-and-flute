@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { useViewManager } from './components/manageView';
-import { Suspense } from 'vue';
+import { useRoute } from 'vue-router';
+import { RouterLink, RouterView } from 'vue-router';
 
-const { views, currentView, setView } = useViewManager();
+const route = useRoute();
 </script>
 
 <template>
@@ -13,15 +13,9 @@ const { views, currentView, setView } = useViewManager();
         <nav class="flex items-center justify-between">
           <h1 class="text-2xl font-bold">Uke & Flute</h1>
           <div class="flex gap-4">
-            <button
-              v-for="view in views"
-              :key="view.id"
-              @click="setView(view.id)"
-              class="btn btn-ghost"
-              :class="{ 'btn-primary': currentView.id === view.id }"
-            >
-              {{ view.name }}
-            </button>
+            <RouterLink :to="{ name: 'tab-management' }" class="btn btn-ghost">
+              Tab Management
+            </RouterLink>
           </div>
         </nav>
       </div>
@@ -29,9 +23,7 @@ const { views, currentView, setView } = useViewManager();
 
     <!-- Main Content -->
     <main class="container mx-auto px-4 py-8">
-      <Suspense>
-        <component :is="currentView.component" />
-      </Suspense>
+      <RouterView />
     </main>
   </div>
 </template>

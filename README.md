@@ -3,9 +3,8 @@
 An experimental webapp for practicing instruments, mainly ukulele and flute.
 Inspired by `yousician` and `SingStar`.
 
-## Content
+## Files, Folders, Functionality
 
-- We don't have a router, we're cheesing it with `manageView.ts`, and pretty badly
 
 ### `MagentaStaffVisualizer`
 

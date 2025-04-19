@@ -21,11 +21,17 @@
                   <p class="text-sm text-base-content/70">Last modified: {{ formatDate(song.updatedAt) }}</p>
                 </div>
                 <div class="flex gap-2">
-                  <button @click="editSong(song)" class="btn btn-sm btn-ghost">
-                    <i class="fas fa-edit"></i>
+                  <RouterLink 
+                    :to="{ name: 'tab-play', params: { id: song.id }}" 
+                    class="btn btn-primary btn-sm"
+                  >
+                    <i class="fas fa-play mr-1"></i>Play
+                  </RouterLink>
+                  <button @click="editSong(song)" class="btn btn-secondary btn-sm">
+                    <i class="fas fa-edit"></i>Edit
                   </button>
-                  <button @click="deleteSong(song.id)" class="btn btn-sm btn-ghost text-error">
-                    <i class="fas fa-trash"></i>
+                  <button @click="deleteSong(song.id)" class="btn btn-error btn-sm">
+                    <i class="fas fa-trash"></i>Delete
                   </button>
                 </div>
               </div>
@@ -96,6 +102,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import { useRouter, RouterLink } from 'vue-router';
 
 interface Song {
   id: string;
@@ -109,6 +116,7 @@ const songs = ref<Song[]>([]);
 const editingSong = ref<Song | null>(null);
 const currentSong = ref<Partial<Song>>({ title: '', tabContent: '' });
 const tabError = ref<string | null>(null);
+const router = useRouter();
 
 // Load songs from localStorage on mount
 onMounted(() => {
@@ -192,6 +200,10 @@ const resetForm = () => {
 
 const formatDate = (date: Date) => {
   return new Date(date).toLocaleDateString();
+};
+
+const playSong = (song: Song) => {
+  router.push(`/play/${song.id}`);
 };
 </script>
 
