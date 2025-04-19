@@ -49,11 +49,7 @@
         <span 
           v-for="(beatGroup, colIndex) in beatsByColumn" 
           :key="colIndex"
-          :class="{ 
-            'active-char': colIndex === currentPosition,
-            'correct-note': beatGroup[row-1].noteThatWasPlayed === beatGroup[row-1].noteToBePlayed,
-            'wrong-note': beatGroup[row-1].noteThatWasPlayed && beatGroup[row-1].noteThatWasPlayed !== beatGroup[row-1].noteToBePlayed
-          }"
+          :class="getNoteClass(beatGroup[row-1], colIndex)"
         >
           {{ beatGroup[row-1].value }}
         </span>
@@ -149,6 +145,8 @@ const NOTE_CHANGE_THRESHOLD = 150;  // Minimum time between different notes
 const PLUCK_DECAY_THRESHOLD = 0.7;  // How much amplitude should drop to consider pluck finished
 const MIN_PLUCK_AMPLITUDE = 0.01;   // Minimum amplitude to start considering a pluck
 const AMPLITUDE_RISE_THRESHOLD = 3; // How many times louder signal needs to be to consider it a new pluck
+
+const timingWindow = computed(() => (60 * 1000 / bpm.value) * 0.5);
 
 // Convert tab content to Beats array
 const initializeBeats = (tabContent: string) => {
@@ -410,6 +408,33 @@ const togglePlay = () => {
   }
 };
 
+const getNoteClass = (beat: Beat, colIndex: number) => {
+  if (colIndex === currentPosition.value) {
+    return 'active-char';
+  }
+  
+  if (!beat.noteToBePlayed) {
+    return '';
+  }
+  
+  if (colIndex < currentPosition.value && !beat.noteThatWasPlayed) {
+    return 'missed-note';
+  }
+  
+  if (beat.noteThatWasPlayed === beat.noteToBePlayed) {
+    if (beat.timingDifference === null || Math.abs(beat.timingDifference) <= timingWindow.value) {
+      return 'correct-note';
+    }
+    return 'wrong-timing';
+  }
+  
+  if (beat.noteThatWasPlayed) {
+    return 'wrong-note';
+  }
+  
+  return '';
+};
+
 onMounted(() => {
   const savedSongs = localStorage.getItem('ukeTabs');
   if (savedSongs) {
@@ -467,10 +492,20 @@ onUnmounted(() => {
   font-weight: bold;
 }
 
+.wrong-timing {
+  color: #eab308; /* yellow-500 */
+  font-weight: bold;
+}
+
 .wrong-note {
   color: #ef4444; /* red-500 */
   font-weight: bold;
   text-decoration: underline;
+}
+
+.missed-note {
+  color: #9ca3af; /* gray-400 */
+  opacity: 0.7;
 }
 
 .input {
