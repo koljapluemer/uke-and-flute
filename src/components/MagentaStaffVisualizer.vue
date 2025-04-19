@@ -71,7 +71,13 @@
   
           if (visualizerContainer.value && noteSequence) {
             visualizerContainer.value.innerHTML = ''; // Clear previous visualization
-            visualizer = new mm.StaffSVGVisualizer(noteSequence, visualizerContainer.value);
+            visualizer = new mm.StaffSVGVisualizer(noteSequence, visualizerContainer.value, {
+              noteHeight: 24, // Increased from 8 to 24 (3x larger)
+              noteSpacing: 24, // Increased from 8 to 24 to match note height
+              pixelsPerTimeStep: 300, // Increased from 100 to 300 for much wider spacing
+              noteRGB: '8, 41, 64', // Dark blue color for better visibility
+              activeNoteRGB: '0, 0, 0' // Black color for active notes
+            });
           }
         }
       };
