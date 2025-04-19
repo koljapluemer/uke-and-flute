@@ -60,6 +60,9 @@
       </div>
     </div>
 
+    <!-- Played Notes Table -->
+    <PlayedNotesTable :played-notes="playedNotes" />
+
     <!-- Beat Data Table -->
     <BeatTable 
       :beats="beats"
@@ -73,6 +76,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import AudioNoteDetector from './AudioNoteDetector.vue';
 import BeatTable from './BeatTable.vue';
+import PlayedNotesTable from './PlayedNotesTable.vue';
 import * as Tone from 'tone';
 
 interface Song {
@@ -94,6 +98,15 @@ interface Beat {
   timingDifference: number | null; // ms difference from perfect timing
 }
 
+interface PlayedNote {
+  timestamp: number;
+  notePlayed: string;
+  beatIndex: number;
+  expectedNote: string | null;
+  status: 'correct' | 'wrong-timing' | 'wrong-note';
+  timingDifference: number;
+}
+
 // MIDI note mapping for ukulele strings (GCEA tuning)
 const UKULELE_MIDI_NOTES = {
   'A': 69, // A4
@@ -111,6 +124,7 @@ const feedbackMessage = ref('');
 const feedbackClass = ref('');
 const loopSong = ref(false);
 const beats = ref<Beat[]>([]);
+const playedNotes = ref<PlayedNote[]>([]);
 
 let playInterval: number | null = null;
 let lastNoteTime = 0;
@@ -171,6 +185,27 @@ const handleNoteDetected = (note: string | null, frequency: number) => {
   const currentBeats = beats.value.filter(b => b.beatIndex === currentPosition.value);
   const expectedNotes = currentBeats.map(b => b.noteToBePlayed).filter(Boolean);
   
+  // Create played note entry
+  const playedNote: PlayedNote = {
+    timestamp: now,
+    notePlayed: note,
+    beatIndex: currentPosition.value,
+    expectedNote: expectedNotes.length > 0 ? expectedNotes[0] : null,
+    status: 'wrong-note',
+    timingDifference: timeSinceLastNote - expectedTime
+  };
+
+  // Update status based on timing and correctness
+  if (expectedNotes.includes(note)) {
+    if (Math.abs(timeSinceLastNote - expectedTime) < timeWindow) {
+      playedNote.status = 'correct';
+    } else {
+      playedNote.status = 'wrong-timing';
+    }
+  }
+
+  playedNotes.value.push(playedNote);
+  
   // Update beats with played note and timing
   if (expectedNotes.includes(note)) {
     currentBeats.forEach(beat => {
@@ -201,6 +236,7 @@ const handleNoteDetected = (note: string | null, frequency: number) => {
 
 const startPlayback = () => {
   // Reset played notes when starting new playback
+  playedNotes.value = [];
   beats.value.forEach(beat => {
     beat.noteThatWasPlayed = null;
     beat.timingDifference = null;
