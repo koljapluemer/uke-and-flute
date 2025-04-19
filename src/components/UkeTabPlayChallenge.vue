@@ -146,7 +146,8 @@ const PLUCK_DECAY_THRESHOLD = 0.7;  // How much amplitude should drop to conside
 const MIN_PLUCK_AMPLITUDE = 0.01;   // Minimum amplitude to start considering a pluck
 const AMPLITUDE_RISE_THRESHOLD = 3; // How many times louder signal needs to be to consider it a new pluck
 
-const timingWindow = computed(() => (60 * 1000 / bpm.value) * 0.5);
+const timingWindow = computed(() => (60 * 1000 / bpm.value) * 0.5); // Half beat window
+const beatDuration = computed(() => 60 * 1000 / bpm.value); // Full beat duration
 
 // Convert tab content to Beats array
 const initializeBeats = (tabContent: string) => {
@@ -409,27 +410,49 @@ const togglePlay = () => {
 };
 
 const getNoteClass = (beat: Beat, colIndex: number) => {
+  // Current position is always blue
   if (colIndex === currentPosition.value) {
     return 'active-char';
   }
   
+  // Empty positions have no color
   if (!beat.noteToBePlayed) {
     return '';
   }
   
-  if (colIndex < currentPosition.value && !beat.noteThatWasPlayed) {
+  // Calculate the ideal timing point for this beat
+  const idealTime = colIndex * beatDuration.value;
+  const windowStart = idealTime - timingWindow.value;
+  const windowEnd = idealTime + timingWindow.value;
+  
+  // Get the current time relative to the start of the song
+  const currentTime = currentPosition.value * beatDuration.value;
+  
+  // Note is in the future
+  if (currentTime < windowStart) {
+    return '';
+  }
+  
+  // Note is in the past and was missed
+  if (currentTime > windowEnd && !beat.noteThatWasPlayed) {
     return 'missed-note';
   }
   
-  if (beat.noteThatWasPlayed === beat.noteToBePlayed) {
-    if (beat.timingDifference === null || Math.abs(beat.timingDifference) <= timingWindow.value) {
-      return 'correct-note';
+  // Note was played
+  if (beat.noteThatWasPlayed) {
+    if (beat.noteThatWasPlayed === beat.noteToBePlayed) {
+      // Check if timing was within the window
+      if (beat.timingDifference === null || Math.abs(beat.timingDifference) <= timingWindow.value) {
+        return 'correct-note';
+      }
+      return 'wrong-timing';
     }
-    return 'wrong-timing';
+    return 'wrong-note';
   }
   
-  if (beat.noteThatWasPlayed) {
-    return 'wrong-note';
+  // Note is in its legal window but hasn't been played yet
+  if (currentTime >= windowStart && currentTime <= windowEnd) {
+    return 'pending-note';
   }
   
   return '';
@@ -505,6 +528,12 @@ onUnmounted(() => {
 
 .missed-note {
   color: #9ca3af; /* gray-400 */
+  opacity: 0.7;
+}
+
+.pending-note {
+  color: #f59e0b; /* amber-500 */
+  font-weight: bold;
   opacity: 0.7;
 }
 
