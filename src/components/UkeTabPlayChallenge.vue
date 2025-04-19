@@ -128,7 +128,10 @@ const playedNotes = ref<PlayedNote[]>([]);
 
 let playInterval: number | null = null;
 let lastNoteTime = 0;
-let expectedNotes: string[] = [];
+let lastDetectionTime = 0;
+let recentDetections: { note: string; frequency: number; amplitude: number; }[] = [];
+const DEBOUNCE_WINDOW = 150; // ms to wait before allowing new note detection
+const DETECTION_BUFFER_WINDOW = 50; // ms to collect rapid detections
 
 // Convert tab content to Beats array
 const initializeBeats = (tabContent: string) => {
@@ -173,10 +176,49 @@ const beatsByColumn = computed(() => {
   return grouped;
 });
 
-const handleNoteDetected = (note: string | null, frequency: number) => {
+const handleNoteDetected = (note: string | null, frequency: number, amplitude: number) => {
   if (!isPlaying.value || !note) return;
   
   const now = Date.now();
+  
+  // Add to recent detections
+  recentDetections.push({ note, frequency, amplitude });
+  
+  // Only process if we're outside the debounce window
+  if (now - lastDetectionTime < DEBOUNCE_WINDOW) {
+    return;
+  }
+  
+  // Clear old detections
+  recentDetections = recentDetections.filter(d => now - d.timestamp > DETECTION_BUFFER_WINDOW);
+  
+  // Find the most common note in the recent detections
+  const noteCounts = recentDetections.reduce((acc, det) => {
+    acc[det.note] = (acc[det.note] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  
+  // Get the note with highest count and highest average amplitude
+  let dominantNote = note;
+  let maxCount = 0;
+  let maxAmplitude = 0;
+  
+  Object.entries(noteCounts).forEach(([detectedNote, count]) => {
+    const avgAmplitude = recentDetections
+      .filter(d => d.note === detectedNote)
+      .reduce((sum, d) => sum + d.amplitude, 0) / count;
+    
+    if (count > maxCount || (count === maxCount && avgAmplitude > maxAmplitude)) {
+      dominantNote = detectedNote;
+      maxCount = count;
+      maxAmplitude = avgAmplitude;
+    }
+  });
+  
+  // Clear recent detections
+  recentDetections = [];
+  lastDetectionTime = now;
+  
   const timeSinceLastNote = now - lastNoteTime;
   const expectedTime = (60 * 1000) / bpm.value;
   const timeWindow = expectedTime * 0.5; // More generous 50% time window
@@ -188,7 +230,7 @@ const handleNoteDetected = (note: string | null, frequency: number) => {
   // Create played note entry
   const playedNote: PlayedNote = {
     timestamp: now,
-    notePlayed: note,
+    notePlayed: dominantNote,
     beatIndex: currentPosition.value,
     expectedNote: expectedNotes.length > 0 ? expectedNotes[0] : null,
     status: 'wrong-note',
@@ -196,7 +238,7 @@ const handleNoteDetected = (note: string | null, frequency: number) => {
   };
 
   // Update status based on timing and correctness
-  if (expectedNotes.includes(note)) {
+  if (expectedNotes.includes(dominantNote)) {
     if (Math.abs(timeSinceLastNote - expectedTime) < timeWindow) {
       playedNote.status = 'correct';
     } else {
@@ -207,10 +249,10 @@ const handleNoteDetected = (note: string | null, frequency: number) => {
   playedNotes.value.push(playedNote);
   
   // Update beats with played note and timing
-  if (expectedNotes.includes(note)) {
+  if (expectedNotes.includes(dominantNote)) {
     currentBeats.forEach(beat => {
-      if (beat.noteToBePlayed === note) {
-        beat.noteThatWasPlayed = note;
+      if (beat.noteToBePlayed === dominantNote) {
+        beat.noteThatWasPlayed = dominantNote;
         beat.timingDifference = timeSinceLastNote - expectedTime;
       }
     });
@@ -224,7 +266,7 @@ const handleNoteDetected = (note: string | null, frequency: number) => {
   } else {
     currentBeats.forEach(beat => {
       if (beat.noteToBePlayed) {
-        beat.noteThatWasPlayed = note;
+        beat.noteThatWasPlayed = dominantNote;
         beat.timingDifference = timeSinceLastNote - expectedTime;
       }
     });
@@ -267,7 +309,6 @@ const stopPlayback = () => {
   currentPosition.value = 0;
   feedbackMessage.value = '';
   feedbackClass.value = '';
-  expectedNotes = [];
   // Don't reset feedbackState here so colors remain after stopping
 };
 

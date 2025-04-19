@@ -79,7 +79,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'noteDetected', note: string | null, frequency: number): void;
+  (e: 'noteDetected', note: string | null, frequency: number, amplitude: number): void;
 }>();
 
 const isDetecting = ref(false);
@@ -95,7 +95,10 @@ let animationFrameId: number | null = null;
 let lastDetectedNote: string | null = null;
 let lastDetectionTime = 0;
 const FREQUENCY_THRESHOLD = 20;
-const DEBOUNCE_TIME = 200;
+const DEBOUNCE_TIME = 150;
+const MIN_CONFIDENCE = 0.1;
+const VALID_OCTAVES = [3, 4, 5];
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 // Watch for autoStart changes
 watch(() => props.autoStart, (newValue) => {
@@ -143,58 +146,75 @@ const detectPitch = (fft: Tone.Analyser) => {
     currentNote.value = null;
     frequency.value = 0;
     maxFftValue.value = 0;
-    emit('noteDetected', null, 0);
+    emit('noteDetected', null, 0, rms);
     animationFrameId = requestAnimationFrame(() => detectPitch(fft));
     return;
   }
   
-  // Find the dominant frequency using FFT
+  // Find the strongest frequency in the ukulele range
   let maxAmplitude = 0;
-  let maxIndex = 0;
+  let peakIndex = 0;
   
-  // Only look at the frequency range we care about (roughly 80-1200 Hz for ukulele with some margin)
-  const minFreqIndex = Math.floor(80 * fftData.length / Tone.context.sampleRate);
-  const maxFreqIndex = Math.ceil(1200 * fftData.length / Tone.context.sampleRate);
+  // Convert frequency range to FFT indices
+  const fftStartIndex = Math.floor(80 * fftData.length / Tone.context.sampleRate);
+  const fftEndIndex = Math.ceil(1200 * fftData.length / Tone.context.sampleRate);
   
-  for (let i = minFreqIndex; i < maxFreqIndex; i++) {
+  for (let i = fftStartIndex; i < fftEndIndex; i++) {
     const amplitude = Math.abs(fftData[i]);
     if (amplitude > maxAmplitude) {
       maxAmplitude = amplitude;
-      maxIndex = i;
+      peakIndex = i;
     }
   }
   
-  maxFftValue.value = maxAmplitude;
-  
   // Convert index to frequency
-  const detectedFreq = (maxIndex * Tone.context.sampleRate) / fftData.length;
+  const detectedFreq = (peakIndex * Tone.context.sampleRate) / fftData.length;
   
-  // Expand the frequency range a bit (80-1200 Hz covers all ukulele notes with some margin)
-  if (detectedFreq < 80 || detectedFreq > 1200) {
+  // Calculate confidence based on relative amplitude
+  const confidence = maxAmplitude / Math.max(...Array.from(fftData).map(Math.abs));
+  maxFftValue.value = confidence;
+  
+  // Basic frequency validation
+  if (confidence < MIN_CONFIDENCE || detectedFreq < 80 || detectedFreq > 1200) {
     currentNote.value = null;
     frequency.value = 0;
-    emit('noteDetected', null, 0);
+    emit('noteDetected', null, 0, rms);
     animationFrameId = requestAnimationFrame(() => detectPitch(fft));
     return;
   }
   
-  // Check if this is a new note (different frequency or enough time has passed)
+  frequency.value = detectedFreq;
+  
+  // Convert frequency to note
+  const note = Tone.Frequency(detectedFreq).toNote();
+  const [noteName, octave] = note.split(/(\d+)/) as [string, string];
+  
+  // Basic octave validation
+  if (!VALID_OCTAVES.includes(parseInt(octave))) {
+    currentNote.value = null;
+    frequency.value = 0;
+    emit('noteDetected', null, 0, rms);
+    animationFrameId = requestAnimationFrame(() => detectPitch(fft));
+    return;
+  }
+  
+  // Check if this is a new note
   const now = Date.now();
   const isNewNote = !lastDetectedNote || 
-    Math.abs(detectedFreq - frequency.value) > FREQUENCY_THRESHOLD ||
-    now - lastDetectionTime > DEBOUNCE_TIME;
+    now - lastDetectionTime > DEBOUNCE_TIME ||
+    lastDetectedNote !== note;
   
   if (isNewNote) {
-    frequency.value = detectedFreq;
-    // Round to nearest note
-    const note = Tone.Frequency(detectedFreq).toNote();
+    // Round to nearest note and check cents deviation
     const roundedFreq = Tone.Frequency(note).toFrequency();
-    // Only emit if we're within 30 cents of a note
-    if (Math.abs(1200 * Math.log2(detectedFreq / roundedFreq)) < 30) {
+    const cents = 1200 * Math.log2(detectedFreq / roundedFreq);
+    
+    // More permissive cents threshold
+    if (Math.abs(cents) < 35) {
       currentNote.value = note;
       lastDetectedNote = note;
       lastDetectionTime = now;
-      emit('noteDetected', note, detectedFreq);
+      emit('noteDetected', note, detectedFreq, confidence);
     }
   }
   
