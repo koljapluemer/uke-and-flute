@@ -5,17 +5,15 @@
       <div class="flex items-center gap-4">
         <div class="flex items-center gap-2">
           <label class="label">
-            <span class="label-text">Speed:</span>
+            <span class="label-text">BPM:</span>
           </label>
           <input 
-            type="range" 
-            min="0.5" 
-            max="2" 
-            step="0.1" 
-            v-model="playbackSpeed" 
-            class="range range-primary w-48"
+            type="number" 
+            min="40" 
+            max="200" 
+            v-model="bpm" 
+            class="input input-bordered w-24"
           />
-          <span class="text-sm">{{ (playbackSpeed * 100).toFixed(0) }}%</span>
         </div>
         <button @click="togglePlay" class="btn btn-primary">
           <i :class="isPlaying ? 'fas fa-pause' : 'fas fa-play'" class="mr-2"></i>
@@ -29,14 +27,18 @@
         v-for="(stanza, index) in tabStanzas" 
         :key="index"
         class="stanza mb-8"
-        :class="{ 'active-stanza': currentStanzaIndex === index }"
       >
         <div 
           v-for="(line, lineIndex) in stanza" 
           :key="lineIndex"
           class="tab-line font-mono text-lg"
         >
-          {{ line }}
+          <span v-for="(char, charIndex) in line" 
+            :key="charIndex"
+            :class="{ 'active-char': charIndex === currentPosition }"
+          >
+            {{ char }}
+          </span>
         </div>
       </div>
     </div>
@@ -58,8 +60,8 @@ interface Song {
 const route = useRoute();
 const currentSong = ref<Song | null>(null);
 const isPlaying = ref(false);
-const playbackSpeed = ref(1);
-const currentStanzaIndex = ref(0);
+const bpm = ref(120);
+const currentPosition = ref(0);
 let playInterval: number | null = null;
 
 const tabStanzas = computed(() => {
@@ -80,12 +82,16 @@ const togglePlay = () => {
 };
 
 const startPlayback = () => {
-  const baseInterval = 1000; // 1 second per stanza at 100% speed
-  const interval = baseInterval / playbackSpeed.value;
+  // Calculate milliseconds per beat based on BPM
+  const msPerBeat = (60 * 1000) / bpm.value;
   
   playInterval = window.setInterval(() => {
-    currentStanzaIndex.value = (currentStanzaIndex.value + 1) % tabStanzas.value.length;
-  }, interval);
+    currentPosition.value++;
+    // Reset position when reaching the end of the first line
+    if (currentPosition.value >= tabStanzas.value[0][0].length) {
+      currentPosition.value = 0;
+    }
+  }, msPerBeat);
 };
 
 const stopPlayback = () => {
@@ -93,6 +99,7 @@ const stopPlayback = () => {
     clearInterval(playInterval);
     playInterval = null;
   }
+  currentPosition.value = 0;
 };
 
 onMounted(() => {
@@ -128,7 +135,12 @@ onUnmounted(() => {
   background-color: rgba(0, 0, 0, 0.1);
 }
 
-.range {
-  --range-shdw: var(--primary);
+.active-char {
+  color: red;
+  font-weight: bold;
+}
+
+.input {
+  text-align: center;
 }
 </style>
