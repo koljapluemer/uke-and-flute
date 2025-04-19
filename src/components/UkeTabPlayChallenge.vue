@@ -22,6 +22,8 @@
       </div>
     </div>
 
+    <AudioNoteDetector class="mb-6" />
+
     <div class="tab-container bg-base-200 p-4 rounded-lg">
       <div 
         v-for="(stanza, index) in tabStanzas" 
@@ -48,6 +50,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
+import AudioNoteDetector from './AudioNoteDetector.vue';
 
 interface Song {
   id: string;
