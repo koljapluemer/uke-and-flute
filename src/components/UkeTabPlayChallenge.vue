@@ -21,7 +21,6 @@
             <input 
               type="checkbox" 
               v-model="loopSong"
-              disabled 
               class="checkbox checkbox-primary"
             />
           </label>
@@ -379,10 +378,14 @@ const startPlayback = () => {
     currentPosition.value++;
     lastNoteTime = Date.now();
     
-    // Stop at the end if not looping
+    // Handle loop transition
     if (currentPosition.value >= beatsByColumn.value.length) {
       if (loopSong.value) {
+        // Reset position and clear feedback for smooth transition
         currentPosition.value = 0;
+        feedbackMessage.value = '';
+        feedbackClass.value = '';
+        // Keep the played notes history
       } else {
         stopPlayback();
       }
@@ -398,7 +401,7 @@ const stopPlayback = () => {
   currentPosition.value = 0;
   feedbackMessage.value = '';
   feedbackClass.value = '';
-  // Don't reset feedbackState here so colors remain after stopping
+  // Don't reset played notes here so history remains after stopping
 };
 
 const togglePlay = () => {
