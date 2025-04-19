@@ -44,16 +44,24 @@
       <p class="text-sm text-gray-500">Next Notes: {{ nextNotes.join(', ') }}</p>
   
       <div ref="visualizerContainer" class="visualizer-container"></div>
+      <UkuleleTabVisualizer 
+        :current-note="currentNote"
+        :note-sequence="noteSequence"
+        :pixels-per-time-step="300"
+        ref="tabVisualizer"
+      />
     </div>
   </template>
   
   <script setup lang="ts">
   import { ref, watch, onMounted } from 'vue';
   import * as mm from '@magenta/music';
+  import UkuleleTabVisualizer from './UkuleleTabVisualizer.vue';
   
-  const currentNote = ref<string>('None');
+  const currentNote = ref<mm.NoteSequence.INote | null>(null);
   const nextNotes = ref<string[]>([]);
   const visualizerContainer = ref<HTMLDivElement | null>(null);
+  const tabVisualizer = ref<InstanceType<typeof UkuleleTabVisualizer> | null>(null);
   const isPlaying = ref(false);
   const playbackSpeed = ref(1); // Default speed: 100%
   const currentFileName = ref<string>('');
@@ -65,17 +73,18 @@
   player = new mm.SoundFontPlayer('https://storage.googleapis.com/magentadata/js/soundfonts/sgm_plus', undefined, undefined, undefined, {
     run: (note: mm.NoteSequence.INote) => {
       const currentNoteIndex = noteSequence?.notes.findIndex((n) => n.startTime === note.startTime) || 0;
-      currentNote.value = getNoteName(note.pitch);
+      currentNote.value = note;
   
       // Display next two notes
       nextNotes.value = (noteSequence?.notes.slice(currentNoteIndex + 1, currentNoteIndex + 3) || [])
         .map((n) => getNoteName(n.pitch));
   
       visualizer?.redraw(note, true); // Highlight active notes and scroll
+      tabVisualizer.value?.scrollToNote(note);
     },
     stop: () => {
       isPlaying.value = false;
-      currentNote.value = 'None';
+      currentNote.value = null;
       nextNotes.value = [];
       visualizer?.clearActiveNotes();
     }
@@ -115,7 +124,7 @@
     if (isPlaying.value) {
       player.stop();
       isPlaying.value = false;
-      currentNote.value = 'None';
+      currentNote.value = null;
       nextNotes.value = [];
     } else if (noteSequence) {
       player.start(noteSequence);
