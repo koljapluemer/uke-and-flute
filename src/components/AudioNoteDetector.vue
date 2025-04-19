@@ -1,6 +1,6 @@
 <template>
   <div class="audio-detector p-4 bg-base-200 rounded-lg">
-    <div class="flex items-center gap-4 mb-4">
+    <div v-if="!autoStart" class="flex items-center gap-4 mb-4">
       <button 
         @click="startDetection" 
         class="btn btn-primary"
@@ -25,8 +25,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onUnmounted } from 'vue';
+import { ref, onUnmounted, watch } from 'vue';
 import * as Tone from 'tone';
+
+const props = defineProps<{
+  autoStart?: boolean;
+}>();
+
+const emit = defineEmits<{
+  (e: 'noteDetected', note: string | null, frequency: number): void;
+}>();
 
 const isDetecting = ref(false);
 const currentNote = ref<string | null>(null);
@@ -35,6 +43,15 @@ const frequency = ref(0);
 let mic: Tone.UserMedia | null = null;
 let analyser: Tone.Analyser | null = null;
 let animationFrameId: number | null = null;
+
+// Watch for autoStart changes
+watch(() => props.autoStart, (newValue) => {
+  if (newValue && !isDetecting.value) {
+    startDetection();
+  } else if (!newValue && isDetecting.value) {
+    stopDetection();
+  }
+});
 
 const startDetection = async () => {
   try {
@@ -113,9 +130,11 @@ const detectPitch = () => {
     const detectedFreq = Tone.context.sampleRate / peakIndex;
     frequency.value = detectedFreq;
     currentNote.value = Tone.Frequency(detectedFreq).toNote();
+    emit('noteDetected', currentNote.value, detectedFreq);
   } else {
     frequency.value = 0;
     currentNote.value = null;
+    emit('noteDetected', null, 0);
   }
   
   animationFrameId = requestAnimationFrame(detectPitch);

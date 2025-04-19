@@ -22,7 +22,15 @@
       </div>
     </div>
 
-    <AudioNoteDetector class="mb-6" />
+    <AudioNoteDetector 
+      class="mb-6" 
+      :auto-start="isPlaying"
+      @note-detected="handleNoteDetected"
+    />
+
+    <div class="feedback mb-4 p-4 rounded-lg" :class="feedbackClass">
+      {{ feedbackMessage }}
+    </div>
 
     <div class="tab-container bg-base-200 p-4 rounded-lg">
       <div 
@@ -37,7 +45,11 @@
         >
           <span v-for="(char, charIndex) in line" 
             :key="charIndex"
-            :class="{ 'active-char': charIndex === currentPosition }"
+            :class="{ 
+              'active-char': charIndex === currentPosition,
+              'correct-note': lastDetectedNote && isCorrectNote(char, charIndex),
+              'wrong-note': lastDetectedNote && isWrongNote(char, charIndex)
+            }"
           >
             {{ char }}
           </span>
@@ -60,12 +72,24 @@ interface Song {
   updatedAt: Date;
 }
 
+// MIDI note mapping for ukulele strings (GCEA tuning)
+const UKULELE_MIDI_NOTES = {
+  'A': 69, // A4
+  'E': 64, // E4
+  'C': 60, // C4
+  'G': 55  // G3
+};
+
 const route = useRoute();
 const currentSong = ref<Song | null>(null);
 const isPlaying = ref(false);
 const bpm = ref(120);
 const currentPosition = ref(0);
+const feedbackMessage = ref('');
+const feedbackClass = ref('');
 let playInterval: number | null = null;
+let lastNoteTime = 0;
+let expectedNotes: string[] = [];
 
 const tabStanzas = computed(() => {
   if (!currentSong.value?.tabContent) return [];
@@ -73,6 +97,83 @@ const tabStanzas = computed(() => {
     .split('\n\n')
     .map(stanza => stanza.split('\n').filter(line => line.trim()));
 });
+
+// Get the expected note for a given position
+const getExpectedNote = (char: string, stringName: string): string | null => {
+  if (char >= '0' && char <= '9') {
+    const fret = parseInt(char);
+    const baseNote = UKULELE_MIDI_NOTES[stringName as keyof typeof UKULELE_MIDI_NOTES];
+    const noteNumber = baseNote + fret;
+    return Tone.Frequency(noteNumber).toNote();
+  }
+  return null;
+};
+
+const lastDetectedNote = ref<string | null>(null);
+
+const isCorrectNote = (char: string, charIndex: number) => {
+  if (charIndex !== currentPosition.value) return false;
+  if (!lastDetectedNote.value) return false;
+  
+  const lineIndex = Math.floor(charIndex / 4);
+  const stringName = ['G', 'C', 'E', 'A'][lineIndex];
+  
+  if (char >= '0' && char <= '9') {
+    const expectedNote = getExpectedNote(char, stringName);
+    return expectedNote === lastDetectedNote.value;
+  }
+  
+  return true;
+};
+
+const isWrongNote = (char: string, charIndex: number) => {
+  if (charIndex !== currentPosition.value) return false;
+  if (!lastDetectedNote.value) return false;
+  
+  const lineIndex = Math.floor(charIndex / 4);
+  const stringName = ['G', 'C', 'E', 'A'][lineIndex];
+  
+  if (char >= '0' && char <= '9') {
+    const expectedNote = getExpectedNote(char, stringName);
+    return expectedNote !== null && expectedNote !== lastDetectedNote.value;
+  }
+  
+  return false;
+};
+
+const handleNoteDetected = (note: string | null, frequency: number) => {
+  lastDetectedNote.value = note;
+  
+  if (!isPlaying.value) return;
+  
+  const now = Date.now();
+  const timeSinceLastNote = now - lastNoteTime;
+  const expectedTime = (60 * 1000) / bpm.value;
+  
+  // Check if we're in the right time window (±20% of expected time)
+  const isInTimeWindow = Math.abs(timeSinceLastNote - expectedTime) < expectedTime * 0.2;
+  
+  if (note) {
+    if (isInTimeWindow) {
+      // Check if the note matches any of the expected notes
+      const isCorrect = expectedNotes.includes(note);
+      
+      if (isCorrect) {
+        feedbackMessage.value = 'Correct note!';
+        feedbackClass.value = 'bg-success text-success-content';
+      } else {
+        feedbackMessage.value = 'Wrong note!';
+        feedbackClass.value = 'bg-error text-error-content';
+      }
+    } else if (timeSinceLastNote < expectedTime * 0.8) {
+      feedbackMessage.value = 'Too early!';
+      feedbackClass.value = 'bg-warning text-warning-content';
+    } else {
+      feedbackMessage.value = 'Too late!';
+      feedbackClass.value = 'bg-warning text-warning-content';
+    }
+  }
+};
 
 const togglePlay = () => {
   isPlaying.value = !isPlaying.value;
@@ -90,6 +191,20 @@ const startPlayback = () => {
   
   playInterval = window.setInterval(() => {
     currentPosition.value++;
+    lastNoteTime = Date.now();
+    
+    // Get expected notes for current position
+    expectedNotes = [];
+    const currentStanza = tabStanzas.value[0]; // For now, just use first stanza
+    currentStanza.forEach((line, index) => {
+      const stringName = ['G', 'C', 'E', 'A'][index];
+      const char = line[currentPosition.value];
+      const expectedNote = getExpectedNote(char, stringName);
+      if (expectedNote) {
+        expectedNotes.push(expectedNote);
+      }
+    });
+    
     // Reset position when reaching the end of the first line
     if (currentPosition.value >= tabStanzas.value[0][0].length) {
       currentPosition.value = 0;
@@ -103,6 +218,9 @@ const stopPlayback = () => {
     playInterval = null;
   }
   currentPosition.value = 0;
+  feedbackMessage.value = '';
+  feedbackClass.value = '';
+  expectedNotes = [];
 };
 
 onMounted(() => {
@@ -139,11 +257,37 @@ onUnmounted(() => {
 }
 
 .active-char {
-  color: red;
+  color: #3b82f6; /* blue-500 */
   font-weight: bold;
+  position: relative;
+}
+
+.active-char::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 2px;
+  background-color: #3b82f6; /* blue-500 */
+}
+
+.correct-note {
+  color: #22c55e; /* green-500 */
+  font-weight: bold;
+}
+
+.wrong-note {
+  color: #ef4444; /* red-500 */
+  font-weight: bold;
+  text-decoration: underline;
 }
 
 .input {
   text-align: center;
+}
+
+.feedback {
+  transition: all 0.3s ease;
 }
 </style>
