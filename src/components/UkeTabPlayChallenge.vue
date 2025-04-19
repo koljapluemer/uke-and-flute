@@ -15,6 +15,17 @@
             class="input input-bordered w-24"
           />
         </div>
+        <div class="form-control">
+          <label class="label cursor-pointer">
+            <span class="label-text mr-2">Loop Song</span>
+            <input 
+              type="checkbox" 
+              v-model="loopSong"
+              disabled 
+              class="checkbox checkbox-primary"
+            />
+          </label>
+        </div>
         <button @click="togglePlay" class="btn btn-primary">
           <i :class="isPlaying ? 'fas fa-pause' : 'fas fa-play'" class="mr-2"></i>
           {{ isPlaying ? 'Pause' : 'Play' }}
@@ -32,30 +43,28 @@
       {{ feedbackMessage }}
     </div>
 
-    <div class="tab-container bg-base-200 p-4 rounded-lg">
-      <div 
-        v-for="(stanza, index) in tabStanzas" 
-        :key="index"
-        class="stanza mb-8"
-      >
-        <div 
-          v-for="(line, lineIndex) in stanza" 
-          :key="lineIndex"
-          class="tab-line font-mono text-lg"
+    <!-- Tab Sheet View -->
+    <div class="tab-container bg-base-200 p-4 rounded-lg mb-8">
+      <div class="tab-line font-mono text-lg" v-for="row in 4" :key="row-1">
+        <span 
+          v-for="(beatGroup, colIndex) in beatsByColumn" 
+          :key="colIndex"
+          :class="{ 
+            'active-char': colIndex === currentPosition,
+            'correct-note': beatGroup[row-1].noteThatWasPlayed === beatGroup[row-1].noteToBePlayed,
+            'wrong-note': beatGroup[row-1].noteThatWasPlayed && beatGroup[row-1].noteThatWasPlayed !== beatGroup[row-1].noteToBePlayed
+          }"
         >
-          <span v-for="(char, charIndex) in line" 
-            :key="charIndex"
-            :class="{ 
-              'active-char': charIndex === currentPosition,
-              'correct-note': lastDetectedNote && isCorrectNote(char, charIndex),
-              'wrong-note': lastDetectedNote && isWrongNote(char, charIndex)
-            }"
-          >
-            {{ char }}
-          </span>
-        </div>
+          {{ beatGroup[row-1].value }}
+        </span>
       </div>
     </div>
+
+    <!-- Beat Data Table -->
+    <BeatTable 
+      :beats="beats"
+      :current-position="currentPosition"
+    />
   </div>
 </template>
 
@@ -63,6 +72,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import AudioNoteDetector from './AudioNoteDetector.vue';
+import BeatTable from './BeatTable.vue';
 import * as Tone from 'tone';
 
 interface Song {
@@ -73,13 +83,24 @@ interface Song {
   updatedAt: Date;
 }
 
+interface Beat {
+  value: string;               // The actual character from tab (number or '-')
+  tabSheetCoordinateRow: number;
+  tabSheetCoordinateCol: number;
+  noteLine: 'G' | 'C' | 'E' | 'A';
+  beatIndex: number;
+  noteToBePlayed: string | null;  // MIDI note name if value is a number
+  noteThatWasPlayed: string | null;
+  timingDifference: number | null; // ms difference from perfect timing
+}
+
 // MIDI note mapping for ukulele strings (GCEA tuning)
 const UKULELE_MIDI_NOTES = {
   'A': 69, // A4
   'E': 64, // E4
   'C': 60, // C4
   'G': 55  // G3
-};
+} as const;
 
 const route = useRoute();
 const currentSong = ref<Song | null>(null);
@@ -88,156 +109,116 @@ const bpm = ref(120);
 const currentPosition = ref(0);
 const feedbackMessage = ref('');
 const feedbackClass = ref('');
+const loopSong = ref(false);
+const beats = ref<Beat[]>([]);
+
 let playInterval: number | null = null;
 let lastNoteTime = 0;
 let expectedNotes: string[] = [];
 
-// Add feedback state tracking
-interface NoteFeedback {
-  isCorrect: boolean;
-  timestamp: number;
-}
+// Convert tab content to Beats array
+const initializeBeats = (tabContent: string) => {
+  const lines = tabContent.split('\n').filter(line => line.trim());
+  const newBeats: Beat[] = [];
+  
+  for (let col = 0; col < lines[0].length; col++) {
+    for (let row = 0; row < lines.length; row++) {
+      const value = lines[row][col];
+      const noteLine = ['G', 'C', 'E', 'A'][row] as 'G' | 'C' | 'E' | 'A';
+      
+      let noteToBePlayed: string | null = null;
+      if (value >= '0' && value <= '9') {
+        const fret = parseInt(value);
+        const baseNote = UKULELE_MIDI_NOTES[noteLine];
+        const noteNumber = baseNote + fret;
+        noteToBePlayed = Tone.Frequency(noteNumber).toNote();
+      }
+      
+      newBeats.push({
+        value,
+        tabSheetCoordinateRow: row,
+        tabSheetCoordinateCol: col,
+        noteLine,
+        beatIndex: col,
+        noteToBePlayed,
+        noteThatWasPlayed: null,
+        timingDifference: null
+      });
+    }
+  }
+  
+  beats.value = newBeats;
+};
 
-const feedbackState = ref<Record<number, NoteFeedback>>({});
-
-const tabStanzas = computed(() => {
-  if (!currentSong.value?.tabContent) return [];
-  return currentSong.value.tabContent
-    .split('\n\n')
-    .map(stanza => stanza.split('\n').filter(line => line.trim()));
+// Group beats by column for rendering
+const beatsByColumn = computed(() => {
+  const grouped: Beat[][] = [];
+  for (let i = 0; i < beats.value.length; i += 4) {
+    grouped.push(beats.value.slice(i, i + 4));
+  }
+  return grouped;
 });
 
-// Get the expected note for a given position
-const getExpectedNote = (char: string, stringName: string): string | null => {
-  if (char >= '0' && char <= '9') {
-    const fret = parseInt(char);
-    const baseNote = UKULELE_MIDI_NOTES[stringName as keyof typeof UKULELE_MIDI_NOTES];
-    const noteNumber = baseNote + fret;
-    return Tone.Frequency(noteNumber).toNote();
-  }
-  return null;
-};
-
-const lastDetectedNote = ref<string | null>(null);
-
-const isCorrectNote = (char: string, charIndex: number) => {
-  // Return stored feedback state if it exists
-  if (feedbackState.value[charIndex]?.isCorrect) {
-    return true;
-  }
-
-  // Only check current position for active highlighting
-  if (charIndex !== currentPosition.value) return false;
-  if (!lastDetectedNote.value) return false;
-  
-  const lineIndex = Math.floor(charIndex / 4);
-  const stringName = ['G', 'C', 'E', 'A'][lineIndex];
-  
-  if (char >= '0' && char <= '9') {
-    const expectedNote = getExpectedNote(char, stringName);
-    return expectedNote === lastDetectedNote.value;
-  }
-  
-  return false;
-};
-
-const isWrongNote = (char: string, charIndex: number) => {
-  // Return stored feedback state if it exists
-  if (feedbackState.value[charIndex]?.isCorrect === false) {
-    return true;
-  }
-
-  // Only check current position for active highlighting
-  if (charIndex !== currentPosition.value) return false;
-  if (!lastDetectedNote.value) return false;
-  
-  const lineIndex = Math.floor(charIndex / 4);
-  const stringName = ['G', 'C', 'E', 'A'][lineIndex];
-  
-  if (char >= '0' && char <= '9') {
-    const expectedNote = getExpectedNote(char, stringName);
-    return expectedNote !== null && expectedNote !== lastDetectedNote.value;
-  }
-  
-  return false;
-};
-
 const handleNoteDetected = (note: string | null, frequency: number) => {
-  lastDetectedNote.value = note;
-  
-  if (!isPlaying.value) return;
+  if (!isPlaying.value || !note) return;
   
   const now = Date.now();
   const timeSinceLastNote = now - lastNoteTime;
   const expectedTime = (60 * 1000) / bpm.value;
   const timeWindow = expectedTime * 0.5; // More generous 50% time window
   
-  // Check if we're in the right time window (±50% of expected time)
-  const isInTimeWindow = Math.abs(timeSinceLastNote - expectedTime) < timeWindow;
+  // Get current beat group (all notes at current position)
+  const currentBeats = beats.value.filter(b => b.beatIndex === currentPosition.value);
+  const expectedNotes = currentBeats.map(b => b.noteToBePlayed).filter(Boolean);
   
-  if (note) {
-    // Check if the note matches any of the expected notes
-    const isCorrect = expectedNotes.includes(note);
+  // Update beats with played note and timing
+  if (expectedNotes.includes(note)) {
+    currentBeats.forEach(beat => {
+      if (beat.noteToBePlayed === note) {
+        beat.noteThatWasPlayed = note;
+        beat.timingDifference = timeSinceLastNote - expectedTime;
+      }
+    });
     
-    // Store feedback state for current position
-    if (isCorrect) {
-      feedbackState.value[currentPosition.value] = {
-        isCorrect: true,
-        timestamp: now
-      };
-      feedbackMessage.value = isInTimeWindow ? 'Correct note!' : (
-        timeSinceLastNote < expectedTime * 0.5 ? 'Too early, but correct note!' : 'Too late, but correct note!'
-      );
-      feedbackClass.value = isInTimeWindow ? 'bg-success text-success-content' : 'bg-warning text-warning-content';
-    } else {
-      feedbackState.value[currentPosition.value] = {
-        isCorrect: false,
-        timestamp: now
-      };
-      feedbackMessage.value = 'Wrong note!';
-      feedbackClass.value = 'bg-error text-error-content';
-    }
-  }
-};
-
-const togglePlay = () => {
-  isPlaying.value = !isPlaying.value;
-  
-  if (isPlaying.value) {
-    startPlayback();
+    feedbackMessage.value = Math.abs(timeSinceLastNote - expectedTime) < timeWindow
+      ? 'Correct note!'
+      : timeSinceLastNote < expectedTime ? 'Too early, but correct note!' : 'Too late, but correct note!';
+    feedbackClass.value = Math.abs(timeSinceLastNote - expectedTime) < timeWindow
+      ? 'bg-success text-success-content'
+      : 'bg-warning text-warning-content';
   } else {
-    stopPlayback();
+    currentBeats.forEach(beat => {
+      if (beat.noteToBePlayed) {
+        beat.noteThatWasPlayed = note;
+        beat.timingDifference = timeSinceLastNote - expectedTime;
+      }
+    });
+    
+    feedbackMessage.value = 'Wrong note!';
+    feedbackClass.value = 'bg-error text-error-content';
   }
 };
 
 const startPlayback = () => {
-  // Reset feedback state when starting new playback
-  feedbackState.value = {};
+  // Reset played notes when starting new playback
+  beats.value.forEach(beat => {
+    beat.noteThatWasPlayed = null;
+    beat.timingDifference = null;
+  });
   
-  // Calculate milliseconds per beat based on BPM
   const msPerBeat = (60 * 1000) / bpm.value;
   
   playInterval = window.setInterval(() => {
     currentPosition.value++;
     lastNoteTime = Date.now();
     
-    // Get expected notes for current position
-    expectedNotes = [];
-    const currentStanza = tabStanzas.value[0]; // For now, just use first stanza
-    currentStanza.forEach((line, index) => {
-      const stringName = ['G', 'C', 'E', 'A'][index];
-      const char = line[currentPosition.value];
-      const expectedNote = getExpectedNote(char, stringName);
-      if (expectedNote) {
-        expectedNotes.push(expectedNote);
+    // Stop at the end if not looping
+    if (currentPosition.value >= beatsByColumn.value.length) {
+      if (loopSong.value) {
+        currentPosition.value = 0;
+      } else {
+        stopPlayback();
       }
-    });
-    
-    // Reset position when reaching the end of the first line
-    if (currentPosition.value >= tabStanzas.value[0][0].length) {
-      currentPosition.value = 0;
-      // Optionally reset feedback state when looping
-      // feedbackState.value = {};
     }
   }, msPerBeat);
 };
@@ -254,11 +235,24 @@ const stopPlayback = () => {
   // Don't reset feedbackState here so colors remain after stopping
 };
 
+const togglePlay = () => {
+  isPlaying.value = !isPlaying.value;
+  
+  if (isPlaying.value) {
+    startPlayback();
+  } else {
+    stopPlayback();
+  }
+};
+
 onMounted(() => {
   const savedSongs = localStorage.getItem('ukeTabs');
   if (savedSongs) {
     const songs = JSON.parse(savedSongs);
     currentSong.value = songs.find((song: any) => song.id === route.params.id);
+    if (currentSong.value) {
+      initializeBeats(currentSong.value.tabContent);
+    }
   }
 });
 
