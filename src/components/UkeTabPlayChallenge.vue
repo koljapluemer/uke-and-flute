@@ -221,7 +221,7 @@ const handleNoteDetected = (note: string | null, frequency: number, amplitude: n
   if (!isPlaying.value || !note) return;
   
   const now = Date.now();
-
+  
   // Pluck detection logic
   const isSignificantRise = amplitude > lastAmplitude * AMPLITUDE_RISE_THRESHOLD;
   
@@ -338,7 +338,8 @@ const updateFeedback = (
 ) => {
   if (playedNote.status === 'correct' || playedNote.status === 'wrong-timing') {
     currentBeats.forEach(beat => {
-      if (beat.noteToBePlayed === playedNote.notePlayed) {
+      // Only update noteThatWasPlayed for actual tab numbers
+      if (beat.noteToBePlayed && beat.noteToBePlayed === playedNote.notePlayed) {
         beat.noteThatWasPlayed = playedNote.notePlayed;
         beat.timingDifference = timeSinceLastNote - expectedTime;
       }
@@ -352,6 +353,7 @@ const updateFeedback = (
       : 'bg-warning text-warning-content';
   } else {
     currentBeats.forEach(beat => {
+      // Only update noteThatWasPlayed for actual tab numbers
       if (beat.noteToBePlayed) {
         beat.noteThatWasPlayed = playedNote.notePlayed;
         beat.timingDifference = timeSinceLastNote - expectedTime;
@@ -415,7 +417,7 @@ const getNoteClass = (beat: Beat, colIndex: number) => {
     return 'active-char';
   }
   
-  // Empty positions have no color
+  // Only process positions that have actual notes (numbers)
   if (!beat.noteToBePlayed) {
     return '';
   }
