@@ -129,9 +129,19 @@ const playedNotes = ref<PlayedNote[]>([]);
 let playInterval: number | null = null;
 let lastNoteTime = 0;
 let lastDetectionTime = 0;
-let recentDetections: { note: string; frequency: number; amplitude: number; }[] = [];
-const DEBOUNCE_WINDOW = 150; // ms to wait before allowing new note detection
-const DETECTION_BUFFER_WINDOW = 50; // ms to collect rapid detections
+let lastPlayedNote: string | null = null;
+let recentDetections: { note: string; frequency: number; amplitude: number; timestamp: number }[] = [];
+let isInPluck = false;
+let pluckStartTime = 0;
+let pluckPeakAmplitude = 0;
+let lastAmplitude = 0;
+
+const MIN_DETECTIONS = 2;           // Minimum detections needed to confirm a note
+const DETECTION_WINDOW = 100;       // Time window to collect detections for analysis
+const NOTE_CHANGE_THRESHOLD = 150;  // Minimum time between different notes
+const PLUCK_DECAY_THRESHOLD = 0.7;  // How much amplitude should drop to consider pluck finished
+const MIN_PLUCK_AMPLITUDE = 0.01;   // Minimum amplitude to start considering a pluck
+const AMPLITUDE_RISE_THRESHOLD = 3; // How many times louder signal needs to be to consider it a new pluck
 
 // Convert tab content to Beats array
 const initializeBeats = (tabContent: string) => {
@@ -180,48 +190,60 @@ const handleNoteDetected = (note: string | null, frequency: number, amplitude: n
   if (!isPlaying.value || !note) return;
   
   const now = Date.now();
+
+  // Pluck detection logic
+  const isSignificantRise = amplitude > lastAmplitude * AMPLITUDE_RISE_THRESHOLD;
   
-  // Add to recent detections
-  recentDetections.push({ note, frequency, amplitude });
+  if (!isInPluck && amplitude > MIN_PLUCK_AMPLITUDE && isSignificantRise) {
+    // Start of a new pluck
+    isInPluck = true;
+    pluckStartTime = now;
+    pluckPeakAmplitude = amplitude;
+    recentDetections = []; // Clear previous detections
+  } else if (isInPluck) {
+    // Update peak amplitude if we're still in attack phase
+    if (amplitude > pluckPeakAmplitude) {
+      pluckPeakAmplitude = amplitude;
+    }
+    
+    // Check if we've decayed enough to end the pluck
+    if (amplitude < pluckPeakAmplitude * PLUCK_DECAY_THRESHOLD) {
+      isInPluck = false;
+      // Process the pluck only after we've seen it decay
+      processPluck(now);
+    }
+  }
   
-  // Only process if we're outside the debounce window
-  if (now - lastDetectionTime < DEBOUNCE_WINDOW) {
+  // Add to recent detections if we're in a pluck
+  if (isInPluck) {
+    recentDetections.push({ note, frequency, amplitude, timestamp: now });
+  }
+  
+  lastAmplitude = amplitude;
+};
+
+const processPluck = (now: number) => {
+  // Remove old detections outside our analysis window
+  recentDetections = recentDetections.filter(d => now - d.timestamp <= DETECTION_WINDOW);
+  
+  // Require minimum detections
+  if (recentDetections.length < MIN_DETECTIONS) {
     return;
   }
   
-  // Clear old detections
-  recentDetections = recentDetections.filter(d => now - d.timestamp > DETECTION_BUFFER_WINDOW);
+  // If it's a different note, ensure minimum time has passed
+  const mostFrequentNote = findDominantNote(recentDetections);
+  if (mostFrequentNote !== lastPlayedNote && now - lastDetectionTime < NOTE_CHANGE_THRESHOLD) {
+    return;
+  }
   
-  // Find the most common note in the recent detections
-  const noteCounts = recentDetections.reduce((acc, det) => {
-    acc[det.note] = (acc[det.note] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-  
-  // Get the note with highest count and highest average amplitude
-  let dominantNote = note;
-  let maxCount = 0;
-  let maxAmplitude = 0;
-  
-  Object.entries(noteCounts).forEach(([detectedNote, count]) => {
-    const avgAmplitude = recentDetections
-      .filter(d => d.note === detectedNote)
-      .reduce((sum, d) => sum + d.amplitude, 0) / count;
-    
-    if (count > maxCount || (count === maxCount && avgAmplitude > maxAmplitude)) {
-      dominantNote = detectedNote;
-      maxCount = count;
-      maxAmplitude = avgAmplitude;
-    }
-  });
-  
-  // Clear recent detections
-  recentDetections = [];
+  // Update state
+  lastPlayedNote = mostFrequentNote;
   lastDetectionTime = now;
   
   const timeSinceLastNote = now - lastNoteTime;
   const expectedTime = (60 * 1000) / bpm.value;
-  const timeWindow = expectedTime * 0.5; // More generous 50% time window
+  const timeWindow = expectedTime * 0.5;
   
   // Get current beat group (all notes at current position)
   const currentBeats = beats.value.filter(b => b.beatIndex === currentPosition.value);
@@ -230,15 +252,15 @@ const handleNoteDetected = (note: string | null, frequency: number, amplitude: n
   // Create played note entry
   const playedNote: PlayedNote = {
     timestamp: now,
-    notePlayed: dominantNote,
+    notePlayed: mostFrequentNote,
     beatIndex: currentPosition.value,
     expectedNote: expectedNotes.length > 0 ? expectedNotes[0] : null,
     status: 'wrong-note',
     timingDifference: timeSinceLastNote - expectedTime
   };
 
-  // Update status based on timing and correctness
-  if (expectedNotes.includes(dominantNote)) {
+  // Rest of the existing note processing logic...
+  if (expectedNotes.includes(mostFrequentNote)) {
     if (Math.abs(timeSinceLastNote - expectedTime) < timeWindow) {
       playedNote.status = 'correct';
     } else {
@@ -247,26 +269,60 @@ const handleNoteDetected = (note: string | null, frequency: number, amplitude: n
   }
 
   playedNotes.value.push(playedNote);
+  updateFeedback(playedNote, currentBeats, timeSinceLastNote, expectedTime, timeWindow);
+};
+
+const findDominantNote = (detections: typeof recentDetections): string => {
+  const noteCounts = new Map<string, { count: number; totalAmplitude: number }>();
   
-  // Update beats with played note and timing
-  if (expectedNotes.includes(dominantNote)) {
+  detections.forEach(detection => {
+    const entry = noteCounts.get(detection.note) || { count: 0, totalAmplitude: 0 };
+    entry.count++;
+    entry.totalAmplitude += detection.amplitude;
+    noteCounts.set(detection.note, entry);
+  });
+  
+  let dominantNote = detections[0].note;
+  let maxCount = 0;
+  let maxAvgAmplitude = 0;
+  
+  noteCounts.forEach((data, detectedNote) => {
+    const avgAmplitude = data.totalAmplitude / data.count;
+    if (data.count > maxCount || (data.count === maxCount && avgAmplitude > maxAvgAmplitude)) {
+      dominantNote = detectedNote;
+      maxCount = data.count;
+      maxAvgAmplitude = avgAmplitude;
+    }
+  });
+  
+  return dominantNote;
+};
+
+const updateFeedback = (
+  playedNote: PlayedNote,
+  currentBeats: Beat[],
+  timeSinceLastNote: number,
+  expectedTime: number,
+  timeWindow: number
+) => {
+  if (playedNote.status === 'correct' || playedNote.status === 'wrong-timing') {
     currentBeats.forEach(beat => {
-      if (beat.noteToBePlayed === dominantNote) {
-        beat.noteThatWasPlayed = dominantNote;
+      if (beat.noteToBePlayed === playedNote.notePlayed) {
+        beat.noteThatWasPlayed = playedNote.notePlayed;
         beat.timingDifference = timeSinceLastNote - expectedTime;
       }
     });
     
-    feedbackMessage.value = Math.abs(timeSinceLastNote - expectedTime) < timeWindow
+    feedbackMessage.value = playedNote.status === 'correct'
       ? 'Correct note!'
       : timeSinceLastNote < expectedTime ? 'Too early, but correct note!' : 'Too late, but correct note!';
-    feedbackClass.value = Math.abs(timeSinceLastNote - expectedTime) < timeWindow
+    feedbackClass.value = playedNote.status === 'correct'
       ? 'bg-success text-success-content'
       : 'bg-warning text-warning-content';
   } else {
     currentBeats.forEach(beat => {
       if (beat.noteToBePlayed) {
-        beat.noteThatWasPlayed = dominantNote;
+        beat.noteThatWasPlayed = playedNote.notePlayed;
         beat.timingDifference = timeSinceLastNote - expectedTime;
       }
     });

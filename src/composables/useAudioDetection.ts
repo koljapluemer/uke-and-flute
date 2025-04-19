@@ -1,5 +1,5 @@
 import { ref, onUnmounted } from 'vue';
-import { ToneJsAudioAdapter } from '../lib/audio/ToneJsAudioAdapter';
+import { YinAudioAdapter } from '../lib/audio/YinAudioAdapter';
 import type { AudioAdapter, AudioDetectionResult } from '../lib/audio/types';
 
 export interface AudioDetectionOptions {
@@ -15,12 +15,11 @@ export function useAudioDetection(options: AudioDetectionOptions = {}) {
   const amplitudeThreshold = ref(0.01);
   const maxValue = ref(0);
 
-  // We'll start with ToneJS but can easily swap this out
   let audioAdapter: AudioAdapter | null = null;
 
   const startDetection = async () => {
     try {
-      audioAdapter = new ToneJsAudioAdapter({
+      audioAdapter = new YinAudioAdapter({
         onNoteDetected: (result) => {
           currentNote.value = result.note;
           frequency.value = result.frequency;
