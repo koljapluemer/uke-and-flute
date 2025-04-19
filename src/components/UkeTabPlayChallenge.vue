@@ -107,12 +107,20 @@ interface PlayedNote {
   timingDifference: number;
 }
 
+// Note mapping for each string (0-based fret positions)
+const STRING_NOTE_MAPPING = {
+  'G': ['G', 'G#/Ab', 'A', 'A#/Bb', 'B', 'C', 'C#/Db', 'D', 'D#/Eb', 'E', 'F', 'F#/Gb'],
+  'C': ['C', 'C#/Db', 'D', 'D#/Eb', 'E', 'F', 'F#/Gb', 'G', 'G#/Ab', 'A', 'A#/Bb', 'B'],
+  'E': ['E', 'F', 'F#/Gb', 'G', 'G#/Ab', 'A', 'A#/Bb', 'B', 'C', 'C#/Db', 'D', 'D#/Eb'],
+  'A': ['A', 'A#/Bb', 'B', 'C', 'C#/Db', 'D', 'D#/Eb', 'E', 'F', 'F#/Gb', 'G', 'G#/Ab']
+} as const;
+
 // MIDI note mapping for ukulele strings (GCEA tuning)
 const UKULELE_MIDI_NOTES = {
-  'A': 69, // A4
-  'E': 64, // E4
-  'C': 60, // C4
-  'G': 55  // G3
+  'G': 67, // G4 (starting note, fret 0)
+  'C': 60, // C4 (starting note, fret 0)
+  'E': 64, // E4 (starting note, fret 0)
+  'A': 69  // A4 (starting note, fret 0)
 } as const;
 
 const route = useRoute();
@@ -148,17 +156,42 @@ const initializeBeats = (tabContent: string) => {
   const lines = tabContent.split('\n').filter(line => line.trim());
   const newBeats: Beat[] = [];
   
-  for (let col = 0; col < lines[0].length; col++) {
-    for (let row = 0; row < lines.length; row++) {
-      const value = lines[row][col];
-      const noteLine = ['G', 'C', 'E', 'A'][row] as 'G' | 'C' | 'E' | 'A';
+  // First, extract the string names from the start of each line
+  const stringLines = lines.map(line => {
+    const stringName = line[0] as 'G' | 'C' | 'E' | 'A';
+    const tabContent = line.slice(1); // Remove the string name
+    return { stringName, tabContent };
+  });
+  
+  // Now process each column
+  for (let col = 0; col < stringLines[0].tabContent.length; col++) {
+    for (let row = 0; row < stringLines.length; row++) {
+      const value = stringLines[row].tabContent[col];
+      const noteLine = stringLines[row].stringName;
       
       let noteToBePlayed: string | null = null;
       if (value >= '0' && value <= '9') {
         const fret = parseInt(value);
-        const baseNote = UKULELE_MIDI_NOTES[noteLine];
-        const noteNumber = baseNote + fret;
-        noteToBePlayed = Tone.Frequency(noteNumber).toNote();
+        // Get the note name from the mapping
+        const noteName = STRING_NOTE_MAPPING[noteLine][fret % 12];
+        // For pitch detection, we'll use the first note name (before the slash)
+        const pitchName = noteName.split('/')[0];
+        // Calculate the octave adjustment
+        const baseOctave = Math.floor(UKULELE_MIDI_NOTES[noteLine] / 12) - 1;
+        const newOctave = baseOctave + Math.floor(fret / 12) + 1;
+        noteToBePlayed = `${pitchName}${newOctave}`;
+        
+        // Debug each step of the conversion
+        console.log('Note calculation debug:', {
+          value,
+          noteLine,
+          fret,
+          fullNoteName: noteName,
+          pitchName,
+          baseOctave,
+          newOctave,
+          finalNote: noteToBePlayed
+        });
       }
       
       newBeats.push({
