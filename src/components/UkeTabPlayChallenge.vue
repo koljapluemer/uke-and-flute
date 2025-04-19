@@ -77,7 +77,6 @@ import { useRoute } from 'vue-router';
 import AudioNoteDetector from './AudioNoteDetector.vue';
 import BeatTable from './BeatTable.vue';
 import PlayedNotesTable from './PlayedNotesTable.vue';
-import * as Tone from 'tone';
 
 interface Song {
   id: string;
@@ -176,8 +175,8 @@ const initializeBeats = (tabContent: string) => {
         const noteName = STRING_NOTE_MAPPING[noteLine][fret % 12];
         // For pitch detection, we'll use the first note name (before the slash)
         const pitchName = noteName.split('/')[0];
-        // Calculate the octave adjustment
-        const baseOctave = Math.floor(UKULELE_MIDI_NOTES[noteLine] / 12) - 1;
+        // Calculate the octave adjustment - subtract 1 to get the correct octave
+        const baseOctave = Math.floor(UKULELE_MIDI_NOTES[noteLine] / 12) - 2;
         const newOctave = baseOctave + Math.floor(fret / 12) + 1;
         noteToBePlayed = `${pitchName}${newOctave}`;
         
