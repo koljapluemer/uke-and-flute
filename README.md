@@ -1,3 +1,6 @@
+> [!NOTE]  
+> *Archived Prototype. See also the adaption in [samlearns](https://github.com/koljapluemer/samlearns).*
+
 # Uke and Flute
 
 An experimental webapp for practicing instruments, mainly ukulele and flute.
